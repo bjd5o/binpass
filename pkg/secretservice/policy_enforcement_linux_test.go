@@ -104,8 +104,8 @@ func denyCallerConfig() Config {
 	return cfg
 }
 
-// storeItem puts one item in the store and returns its object path.
-func storeItem(t *testing.T, store *Store, collection, secretValue string) dbus.ObjectPath {
+// storeItem puts one item in the store and returns it with its object path.
+func storeItem(t *testing.T, store *Store, collection, secretValue string) (*Item, dbus.ObjectPath) {
 	t.Helper()
 	it, err := store.CreateItem(collection, &Item{
 		Label:      "GitHub",
@@ -113,7 +113,7 @@ func storeItem(t *testing.T, store *Store, collection, secretValue string) dbus.
 		Attributes: map[string]string{"server": "github.com"},
 	}, false)
 	require.NoError(t, err)
-	return itemObjectPath(collection, it.ID)
+	return it, itemObjectPath(collection, it.ID)
 }
 
 // TestGetSecretsEnforcesThePolicy covers the batch read. It handed out the
@@ -149,7 +149,7 @@ func TestGetSecretsEnforcesThePolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, store := newPolicyService(t, tc.cfg)
-			item := storeItem(t, store, "login", "hunter2")
+			_, item := storeItem(t, store, "login", "hunter2")
 			sess := openPlainSession(t, svc, tc.sender)
 
 			out, derr := svc.GetSecrets(senderMessage(tc.sender), []dbus.ObjectPath{item}, sess)
@@ -165,6 +165,58 @@ func TestGetSecretsEnforcesThePolicy(t *testing.T) {
 			}
 			require.Len(t, out, 1)
 			assert.Equal(t, tc.want, string(out[item].Value))
+		})
+	}
+}
+
+// TestWritesGoThroughThePolicy covers the integrity half of the policy. Only
+// reads used to consult it, so a program a deny rule refused could still
+// replace the secret in any item — a password its owner would then retype
+// somewhere it does not belong — or fill a collection with items of its own.
+func TestWritesGoThroughThePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// write performs the write as sender and reports the D-Bus error.
+		write func(svc *Service, sender string, sess dbus.ObjectPath, id string) *dbus.Error
+	}{
+		{
+			name: "Item.SetSecret",
+			write: func(svc *Service, sender string, sess dbus.ObjectPath, id string) *dbus.Error {
+				obj := &itemObject{service: svc, collection: "login", id: id}
+				return obj.SetSecret(senderMessage(sender), Secret{
+					Session: sess,
+					Value:   []byte("planted"),
+				})
+			},
+		},
+		{
+			name: "Collection.CreateItem",
+			write: func(svc *Service, sender string, sess dbus.ObjectPath, _ string) *dbus.Error {
+				col := &collection{service: svc, name: "login"}
+				_, _, derr := col.CreateItem(senderMessage(sender), map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label":      dbus.MakeVariant("GitHub"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{"server": "github.com"}),
+				}, Secret{Session: sess, Value: []byte("planted")}, true)
+				return derr
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const sender = ":1.7"
+			svc, store := newPolicyService(t, denyCallerConfig())
+			it, _ := storeItem(t, store, "login", "hunter2")
+			sess := openPlainSession(t, svc, sender)
+
+			derr := tc.write(svc, sender, sess, it.ID)
+			assert.NotNil(t, derr, "a denied caller must not be able to write")
+
+			got, err := store.Item("login", it.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "hunter2", got.Secret, "the stored password must survive a refused write")
+
+			items, err := store.Items("login")
+			require.NoError(t, err)
+			assert.Len(t, items, 1, "a refused write must not add an item either")
 		})
 	}
 }

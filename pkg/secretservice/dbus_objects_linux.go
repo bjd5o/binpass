@@ -15,22 +15,34 @@ type collection struct {
 }
 
 // CreateItem implements org.freedesktop.Secret.Collection.CreateItem.
-func (c *collection) CreateItem(properties map[string]dbus.Variant, secretValue Secret, replace bool) (dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
+//
+// Storing is as much a decision as reading: a program the policy refuses
+// must not be able to replace a password its owner then retypes somewhere
+// else, nor to fill a collection with items of its own. The check happens
+// before the client's secret is decrypted, so a refusal costs nothing.
+func (c *collection) CreateItem(message dbus.Message, properties map[string]dbus.Variant, secretValue Secret, replace bool) (dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
 	sess, ok := c.service.session(secretValue.Session)
 	if !ok {
 		return "/", "/", dbusErrf("org.freedesktop.Secret.Error.NoSession", "no such session")
+	}
+
+	it := &Item{
+		Label:      stringProp(properties, "org.freedesktop.Secret.Item.Label"),
+		Attributes: attributesProp(properties, "org.freedesktop.Secret.Item.Attributes"),
+	}
+
+	sender := senderOf(message)
+	allowed, reason := c.service.policy.Allow(sender, c.name, it)
+	c.service.policy.Record(sender, c.name, it, allowed)
+	if !allowed {
+		return "/", "/", dbusErrf("org.freedesktop.Secret.Error.IsLocked", "%s", reason)
 	}
 
 	plaintext, err := sess.Decrypt(secretValue.Value, secretValue.Parameters)
 	if err != nil {
 		return "/", "/", dbusErrf("org.freedesktop.DBus.Error.InvalidArgs", "%s", err)
 	}
-
-	it := &Item{
-		Label:      stringProp(properties, "org.freedesktop.Secret.Item.Label"),
-		Attributes: attributesProp(properties, "org.freedesktop.Secret.Item.Attributes"),
-		Secret:     string(plaintext),
-	}
+	it.Secret = string(plaintext)
 
 	stored, err := c.service.store.CreateItem(c.name, it, replace)
 	if err != nil {
@@ -104,19 +116,31 @@ func (i *itemObject) GetSecret(message dbus.Message, session dbus.ObjectPath) (S
 }
 
 // SetSecret implements org.freedesktop.Secret.Item.SetSecret.
-func (i *itemObject) SetSecret(secretValue Secret) *dbus.Error {
+//
+// Overwriting an item is checked against the policy for the same reason
+// CreateItem is: a denial that only covered reads would leave a refused
+// program free to swap the stored password for one of its own.
+func (i *itemObject) SetSecret(message dbus.Message, secretValue Secret) *dbus.Error {
 	sess, ok := i.service.session(secretValue.Session)
 	if !ok {
 		return dbusErrf("org.freedesktop.Secret.Error.NoSession", "no such session")
-	}
-	plaintext, err := sess.Decrypt(secretValue.Value, secretValue.Parameters)
-	if err != nil {
-		return dbusErrf("org.freedesktop.DBus.Error.InvalidArgs", "%s", err)
 	}
 
 	it, err := i.service.store.Item(i.collection, i.id)
 	if err != nil {
 		return dbusErrf("org.freedesktop.Secret.Error.NoSuchObject", "%s", err)
+	}
+
+	sender := senderOf(message)
+	allowed, reason := i.service.policy.Allow(sender, i.collection, it)
+	i.service.policy.Record(sender, i.collection, it, allowed)
+	if !allowed {
+		return dbusErrf("org.freedesktop.Secret.Error.IsLocked", "%s", reason)
+	}
+
+	plaintext, err := sess.Decrypt(secretValue.Value, secretValue.Parameters)
+	if err != nil {
+		return dbusErrf("org.freedesktop.DBus.Error.InvalidArgs", "%s", err)
 	}
 	it.Secret = string(plaintext)
 

@@ -267,6 +267,10 @@ func (g *GitRemote) remoteHeadBranch(ctx context.Context, remoteName string) (st
 
 // Push flushes all local commits to the configured remote. This should be
 // called after all Put/Delete/Rename operations are complete.
+//
+// The remote is the one the user configured, not "origin": a store with a
+// second remote (`--remote=backup`) otherwise had every sync pushed to
+// origin and reported as successful, so the backup never received anything.
 func (g *GitRemote) Push(ctx context.Context) error {
 	if !g.hasRemote(ctx) {
 		return nil // nothing to push to.
@@ -275,11 +279,11 @@ func (g *GitRemote) Push(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("remote/git: cannot determine the current branch: %w", err)
 	}
-	if _, err := g.git(ctx, "push", "origin", branch); err != nil {
+	if _, err := g.git(ctx, "push", g.remoteName(), branch); err != nil {
 		// If there's no upstream yet, set it.
 		if strings.Contains(err.Error(), "no upstream") ||
 			strings.Contains(err.Error(), "has no upstream") {
-			if _, err := g.git(ctx, "push", "-u", "origin", branch); err != nil {
+			if _, err := g.git(ctx, "push", "-u", g.remoteName(), branch); err != nil {
 				return fmt.Errorf("remote/git: push -u: %w", err)
 			}
 			return nil

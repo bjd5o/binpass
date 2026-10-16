@@ -51,7 +51,7 @@ func (a *Age) ParseRecipients(dir string) ([]Recipient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return readRecipientsFile(path)
+	return ReadRecipientsFile(path)
 }
 
 // Encrypt writes an age ciphertext for plaintext to w.

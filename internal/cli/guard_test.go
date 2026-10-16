@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,6 +81,13 @@ func TestCommandsRefuseOutOfScopeEntries(t *testing.T) {
 		},
 		"init": func(a *testApp) error {
 			return a.runInit("", []string{"age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"}, "")
+		},
+		"sops": func(a *testApp) error {
+			cmd := newSopsCmd(a.App)
+			cmd.SetArgs([]string{"ls", filepath.Join(t.TempDir(), "secrets.yaml")})
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			return cmd.Execute()
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/71g3pf4c3/binpass/internal/tui"
+	"github.com/71g3pf4c3/binpass/pkg/plugin"
 	"github.com/71g3pf4c3/binpass/pkg/secret"
 	"github.com/71g3pf4c3/binpass/pkg/sopsfile"
 	"github.com/71g3pf4c3/binpass/pkg/store"
@@ -29,6 +30,16 @@ A file that does not exist yet is created from its first key through the
 project's .sops.yaml creation rules.
 
 Requires sops 3.10 or newer on PATH.`,
+		// A plugin's grant is spelled in store entry names; it has no word
+		// for a sops document, so a plugin driving binpass gets no sops at
+		// all rather than every file the user's keys can open.
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			if g := app.Guard(); g.Active {
+				return fmt.Errorf("%w: plugin %q may not use sops; capabilities cover store entries only",
+					plugin.ErrDenied, g.Name)
+			}
+			return nil
+		},
 	}
 	cmd.AddCommand(
 		newSopsEditCmd(app),

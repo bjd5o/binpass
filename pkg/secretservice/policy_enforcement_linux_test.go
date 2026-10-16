@@ -89,9 +89,9 @@ func senderMessage(sender string) dbus.Message {
 }
 
 // openPlainSession opens a plain-algorithm session for sender.
-func openPlainSession(t *testing.T, svc *Service, _ string) dbus.ObjectPath {
+func openPlainSession(t *testing.T, svc *Service, sender string) dbus.ObjectPath {
 	t.Helper()
-	_, p, derr := svc.OpenSession(AlgPlain, dbus.MakeVariant(""))
+	_, p, derr := svc.OpenSession(senderMessage(sender), AlgPlain, dbus.MakeVariant(""))
 	require.Nil(t, derr)
 	return p
 }
@@ -217,6 +217,49 @@ func TestWritesGoThroughThePolicy(t *testing.T) {
 			items, err := store.Items("login")
 			require.NoError(t, err)
 			assert.Len(t, items, 1, "a refused write must not add an item either")
+		})
+	}
+}
+
+// TestSessionsAreBoundToTheClientThatOpenedThem covers session ownership.
+// Session paths are numbered s1, s2, …, so any process on the bus can guess
+// them; while a session was resolved by path alone, a stranger could close
+// another client's session — breaking that client's next read — or ride it.
+// The same call must succeed for the client that opened the session and fail
+// for anyone else.
+func TestSessionsAreBoundToTheClientThatOpenedThem(t *testing.T) {
+	const owner, stranger = ":1.7", ":1.9"
+
+	for _, tc := range []struct {
+		name string
+		// act performs the call on the owner's session as sender.
+		act func(svc *Service, sess dbus.ObjectPath, id, sender string) *dbus.Error
+	}{
+		{
+			name: "Item.GetSecret",
+			act: func(svc *Service, sess dbus.ObjectPath, id, sender string) *dbus.Error {
+				obj := &itemObject{service: svc, collection: "login", id: id}
+				_, derr := obj.GetSecret(senderMessage(sender), sess)
+				return derr
+			},
+		},
+		{
+			name: "Session.Close",
+			act: func(svc *Service, sess dbus.ObjectPath, _, sender string) *dbus.Error {
+				obj := &sessionObject{service: svc, path: sess}
+				return obj.Close(senderMessage(sender))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, store := newPolicyService(t, DefaultConfig())
+			it, _ := storeItem(t, store, "login", "hunter2")
+			sess := openPlainSession(t, svc, owner)
+
+			assert.NotNil(t, tc.act(svc, sess, it.ID, stranger),
+				"a session must not answer to a client that did not open it")
+			assert.Nil(t, tc.act(svc, sess, it.ID, owner),
+				"and the refusal must not have disturbed the owner's session")
 		})
 	}
 }

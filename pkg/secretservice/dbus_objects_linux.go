@@ -21,7 +21,8 @@ type collection struct {
 // else, nor to fill a collection with items of its own. The check happens
 // before the client's secret is decrypted, so a refusal costs nothing.
 func (c *collection) CreateItem(message dbus.Message, properties map[string]dbus.Variant, secretValue Secret, replace bool) (dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
-	sess, ok := c.service.session(secretValue.Session)
+	sender := senderOf(message)
+	sess, ok := c.service.session(secretValue.Session, sender)
 	if !ok {
 		return "/", "/", dbusErrf("org.freedesktop.Secret.Error.NoSession", "no such session")
 	}
@@ -31,7 +32,6 @@ func (c *collection) CreateItem(message dbus.Message, properties map[string]dbus
 		Attributes: attributesProp(properties, "org.freedesktop.Secret.Item.Attributes"),
 	}
 
-	sender := senderOf(message)
 	allowed, reason := c.service.policy.Allow(sender, c.name, it)
 	c.service.policy.Record(sender, c.name, it, allowed)
 	if !allowed {
@@ -91,7 +91,8 @@ type itemObject struct {
 // policy is enforced: the caller is identified from the bus message, and a
 // denial returns an error without anything being decrypted for the wire.
 func (i *itemObject) GetSecret(message dbus.Message, session dbus.ObjectPath) (Secret, *dbus.Error) {
-	sess, ok := i.service.session(session)
+	sender := senderOf(message)
+	sess, ok := i.service.session(session, sender)
 	if !ok {
 		return Secret{}, dbusErrf("org.freedesktop.Secret.Error.NoSession", "no such session")
 	}
@@ -101,7 +102,6 @@ func (i *itemObject) GetSecret(message dbus.Message, session dbus.ObjectPath) (S
 		return Secret{}, dbusErrf("org.freedesktop.Secret.Error.NoSuchObject", "%s", err)
 	}
 
-	sender := senderOf(message)
 	allowed, reason := i.service.policy.Allow(sender, i.collection, it)
 	i.service.policy.Record(sender, i.collection, it, allowed)
 	if !allowed {
@@ -121,7 +121,8 @@ func (i *itemObject) GetSecret(message dbus.Message, session dbus.ObjectPath) (S
 // CreateItem is: a denial that only covered reads would leave a refused
 // program free to swap the stored password for one of its own.
 func (i *itemObject) SetSecret(message dbus.Message, secretValue Secret) *dbus.Error {
-	sess, ok := i.service.session(secretValue.Session)
+	sender := senderOf(message)
+	sess, ok := i.service.session(secretValue.Session, sender)
 	if !ok {
 		return dbusErrf("org.freedesktop.Secret.Error.NoSession", "no such session")
 	}
@@ -131,7 +132,6 @@ func (i *itemObject) SetSecret(message dbus.Message, secretValue Secret) *dbus.E
 		return dbusErrf("org.freedesktop.Secret.Error.NoSuchObject", "%s", err)
 	}
 
-	sender := senderOf(message)
 	allowed, reason := i.service.policy.Allow(sender, i.collection, it)
 	i.service.policy.Record(sender, i.collection, it, allowed)
 	if !allowed {
@@ -169,8 +169,15 @@ type sessionObject struct {
 }
 
 // Close implements org.freedesktop.Secret.Session.Close.
-func (s *sessionObject) Close() *dbus.Error {
-	s.service.closeSession(s.path)
+//
+// Only the client that opened the session may close it. Session paths are
+// sequential small integers, so without this any process on the bus could
+// enumerate them and drop another program's session, which fails that
+// program's next read.
+func (s *sessionObject) Close(message dbus.Message) *dbus.Error {
+	if !s.service.closeSession(s.path, senderOf(message)) {
+		return dbusErrf("org.freedesktop.Secret.Error.NoSession", "no such session")
+	}
 	return nil
 }
 

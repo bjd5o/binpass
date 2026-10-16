@@ -55,9 +55,21 @@ type Service struct {
 	// mu guards sessions.
 	mu sync.Mutex
 	// sessions holds the open transport sessions by object path.
-	sessions map[dbus.ObjectPath]*Session
+	sessions map[dbus.ObjectPath]*openSession
 	// nextSession numbers session paths.
 	nextSession int
+}
+
+// openSession is a transport session together with the client that opened it.
+//
+// Binding the two is what keeps one program out of another's session: the
+// paths are sequential small integers, so any process on the bus can guess
+// them, and an unbound session could be used or closed by whoever asked.
+type openSession struct {
+	// sess is the negotiated transport session.
+	sess *Session
+	// sender is the unique bus name that opened it.
+	sender string
 }
 
 // Policy decides whether a caller may have a secret. It is consulted before
@@ -85,7 +97,7 @@ func NewService(conn *dbus.Conn, store *Store, policy Policy) *Service {
 		conn:     conn,
 		store:    store,
 		policy:   policy,
-		sessions: map[dbus.ObjectPath]*Session{},
+		sessions: map[dbus.ObjectPath]*openSession{},
 	}
 }
 
@@ -266,7 +278,12 @@ func (s *Service) exportItem(collectionName string, it *Item) error {
 }
 
 // OpenSession implements org.freedesktop.Secret.Service.OpenSession.
-func (s *Service) OpenSession(algorithm string, input dbus.Variant) (dbus.Variant, dbus.ObjectPath, *dbus.Error) {
+//
+// The session is remembered against the caller's bus name, which is how
+// every later use of it is checked.
+func (s *Service) OpenSession(message dbus.Message, algorithm string, input dbus.Variant) (dbus.Variant, dbus.ObjectPath, *dbus.Error) {
+	sender := senderOf(message)
+
 	s.mu.Lock()
 	s.nextSession++
 	id := fmt.Sprintf("s%d", s.nextSession)
@@ -277,7 +294,7 @@ func (s *Service) OpenSession(algorithm string, input dbus.Variant) (dbus.Varian
 	switch algorithm {
 	case AlgPlain:
 		sess := NewPlainSession(id)
-		s.register(p, sess)
+		s.register(p, sess, sender)
 		return dbus.MakeVariant(""), p, nil
 
 	case AlgDH:
@@ -290,7 +307,7 @@ func (s *Service) OpenSession(algorithm string, input dbus.Variant) (dbus.Varian
 		if err != nil {
 			return dbus.MakeVariant(""), "", dbusErrf("org.freedesktop.DBus.Error.InvalidArgs", "%s", err)
 		}
-		s.register(p, sess)
+		s.register(p, sess, sender)
 		return dbus.MakeVariant(serverPub), p, nil
 
 	default:
@@ -301,10 +318,10 @@ func (s *Service) OpenSession(algorithm string, input dbus.Variant) (dbus.Varian
 	}
 }
 
-// register exports a session object and remembers its key.
-func (s *Service) register(p dbus.ObjectPath, sess *Session) {
+// register exports a session object and remembers its key and its owner.
+func (s *Service) register(p dbus.ObjectPath, sess *Session, sender string) {
 	s.mu.Lock()
-	s.sessions[p] = sess
+	s.sessions[p] = &openSession{sess: sess, sender: sender}
 	s.mu.Unlock()
 
 	_ = s.conn.Export(&sessionObject{service: s, path: p}, p, SessionInterface)
@@ -312,20 +329,34 @@ func (s *Service) register(p dbus.ObjectPath, sess *Session) {
 		"org.freedesktop.DBus.Introspectable")
 }
 
-// session returns an open session by path.
-func (s *Service) session(p dbus.ObjectPath) (*Session, bool) {
+// session returns an open session by path, provided it belongs to sender.
+//
+// A session held by someone else is reported as absent rather than as a
+// refusal: the caller is not entitled to learn that the path exists.
+func (s *Service) session(p dbus.ObjectPath, sender string) (*Session, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess, ok := s.sessions[p]
-	return sess, ok
+	open, ok := s.sessions[p]
+	if !ok || open.sender != sender {
+		return nil, false
+	}
+	return open.sess, true
 }
 
 // closeSession forgets a session, which is what makes its key unrecoverable.
-func (s *Service) closeSession(p dbus.ObjectPath) {
+// It reports whether sender owned the session; a stranger closes nothing.
+func (s *Service) closeSession(p dbus.ObjectPath, sender string) bool {
 	s.mu.Lock()
-	delete(s.sessions, p)
+	open, ok := s.sessions[p]
+	if ok && open.sender == sender {
+		delete(s.sessions, p)
+	}
 	s.mu.Unlock()
+	if !ok || open.sender != sender {
+		return false
+	}
 	_ = s.conn.Export(nil, p, SessionInterface)
+	return true
 }
 
 // SearchItems implements org.freedesktop.Secret.Service.SearchItems.
@@ -381,7 +412,7 @@ func (s *Service) GetSecrets(message dbus.Message, items []dbus.ObjectPath, sess
 			"binpass cannot identify the caller of GetSecrets and will not hand out secrets to it")
 	}
 
-	sess, ok := s.session(session)
+	sess, ok := s.session(session, sender)
 	if !ok {
 		return nil, dbusErrf("org.freedesktop.Secret.Error.NoSession", "no such session")
 	}

@@ -56,13 +56,21 @@ func (c *collection) CreateItem(message dbus.Message, properties map[string]dbus
 }
 
 // SearchItems implements org.freedesktop.Secret.Collection.SearchItems.
-func (c *collection) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
+//
+// Same filtering as the service-level search: a caller a deny rule covers
+// must not learn which items exist. Nothing is decrypted here, so no audit
+// record is written.
+func (c *collection) SearchItems(message dbus.Message, attributes map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
+	sender := senderOf(message)
 	items, err := c.service.store.Search(c.name, attributes)
 	if err != nil {
 		return nil, dbusErrf("org.freedesktop.Secret.Error.NoSuchObject", "%s", err)
 	}
 	out := make([]dbus.ObjectPath, 0, len(items))
 	for _, it := range items {
+		if allowed, _ := c.service.policy.Allow(sender, c.name, it); !allowed {
+			continue
+		}
 		out = append(out, itemObjectPath(c.name, it.ID))
 	}
 	return out, nil

@@ -281,11 +281,18 @@ func TestSearchItemsFiltersOnThePolicy(t *testing.T) {
 			svc, store := newPolicyService(t, tc.cfg)
 			storeItem(t, store, "login", "hunter2")
 
-			unlocked, locked, derr := svc.SearchItems(senderMessage(":1.7"),
-				map[string]string{"server": "github.com"})
+			attrs := map[string]string{"server": "github.com"}
+			unlocked, locked, derr := svc.SearchItems(senderMessage(":1.7"), attrs)
 			require.Nil(t, derr)
 			assert.Empty(t, locked, "a store this provider can read has nothing locked")
 			assert.Len(t, unlocked, tc.wantLen)
+
+			// libsecret also searches one collection at a time; the same
+			// rule must hold there.
+			col := &collection{service: svc, name: "login"}
+			got, derr := col.SearchItems(senderMessage(":1.7"), attrs)
+			require.Nil(t, derr)
+			assert.Len(t, got, tc.wantLen)
 		})
 	}
 }

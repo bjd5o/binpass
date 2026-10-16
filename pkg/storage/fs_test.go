@@ -218,10 +218,11 @@ func TestRename(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "the source directory is pruned when it empties")
 }
 
-// TestWritesRefuseSymlinkedParents plants a symlink inside the store, which
-// is what a hostile sync remote can commit, and checks that no write follows
-// it: MkdirAll, CreateTemp and Rename all dereference at the kernel level, so
-// a lexically valid entry name would otherwise land outside the store.
+// TestWritesRefuseSymlinkedParents plants a symlink inside the store pointing
+// outside it, which is what a hostile sync remote can commit, and checks that
+// no write follows it: MkdirAll, CreateTemp and Rename all dereference at the
+// kernel level, so a lexically valid entry name would otherwise land outside
+// the store.
 func TestWritesRefuseSymlinkedParents(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks requires privileges on Windows")
@@ -298,6 +299,28 @@ func TestWritesRefuseSymlinkedParents(t *testing.T) {
 			assert.Equal(t, "a local file", string(got), "the link target is untouched")
 		})
 	}
+}
+
+// TestWritesFollowASymlinkInsideTheStore is the other half of the containment
+// rule: pass follows symlinks, and aliasing one subtree of the store as
+// another is an ordinary layout, so a link that stays inside the store is
+// written through rather than refused.
+func TestWritesFollowASymlinkInsideTheStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on Windows")
+	}
+	f := newFS(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(f.Dir, "company", "work"), 0o700))
+	require.NoError(t, os.Symlink(filepath.Join("company", "work"), filepath.Join(f.Dir, "work")))
+
+	path := filepath.Join(f.Dir, "work", "mail.gpg")
+	require.NoError(t, f.Write(path, []byte("ciphertext")))
+	require.NoError(t, f.MkdirAll(filepath.Join(f.Dir, "work", "deeper")))
+	require.NoError(t, f.Rename(path, filepath.Join(f.Dir, "work", "deeper", "mail.gpg")))
+
+	got, err := f.Read(filepath.Join(f.Dir, "company", "work", "deeper", "mail.gpg"))
+	require.NoError(t, err)
+	assert.Equal(t, "ciphertext", string(got))
 }
 
 func TestWritesAllowASymlinkedStoreRoot(t *testing.T) {

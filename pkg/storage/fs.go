@@ -67,47 +67,74 @@ func (f *FS) rel(name string) (string, error) {
 		return "", fmt.Errorf("%w: %q", ErrOutsideStore, name)
 	}
 	clean := filepath.Clean(filepath.FromSlash(name))
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if escapes(clean) {
 		return "", fmt.Errorf("%w: %q", ErrOutsideStore, name)
 	}
 	return clean, nil
 }
 
-// checkNoSymlink verifies that no existing component of path below the store
-// root is a symbolic link.
+// checkContained verifies that path, with every symlink on it resolved, still
+// lies below the store root.
 //
 // rel validates names lexically, which says nothing about what is on disk:
 // os.MkdirAll is satisfied by a symlink that already resolves to a directory,
 // and os.CreateTemp and os.Rename then write through it, outside the store.
-// Store content can arrive from a sync remote, so the chain is checked before
-// anything is created. The root itself is never inspected: a store kept
-// elsewhere and symlinked into place is an ordinary pass setup, so only the
-// components the store owns are constrained.
-func (f *FS) checkNoSymlink(path string) error {
+// Store content can arrive from a sync remote, so the chain is resolved before
+// anything is created. Symlinks are not refused as such: pass follows them,
+// and a subtree aliased inside the store, or a store kept elsewhere and
+// symlinked into place, are ordinary setups. Only a link whose target leaves
+// the store is an escape.
+func (f *FS) checkContained(path string) error {
 	rel, err := filepath.Rel(f.Dir, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || escapes(rel) {
 		return fmt.Errorf("%w: %q", ErrOutsideStore, path)
 	}
-	if rel == "." {
-		return nil
+	root, err := resolveExisting(f.Dir)
+	if err != nil {
+		return err
 	}
-	cur := f.Dir
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
-		if err != nil {
-			// The first missing component ends the chain: what does not
-			// exist cannot be a link, and the write creates it itself.
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: %q is a symbolic link", ErrOutsideStore, cur)
-		}
+	resolved, err := resolveExisting(path)
+	if err != nil {
+		return err
+	}
+	rel, err = filepath.Rel(root, resolved)
+	if err != nil || escapes(rel) {
+		return fmt.Errorf("%w: %q resolves to %q", ErrOutsideStore, path, resolved)
 	}
 	return nil
+}
+
+// resolveExisting evaluates the symlinks on the longest existing prefix of
+// path and reattaches the missing tail: what does not exist cannot be a link,
+// and the write creates it itself below the resolved parent. The store root
+// itself may not exist yet, on init.
+func resolveExisting(path string) (string, error) {
+	existing, tail := path, ""
+	for {
+		_, err := os.Lstat(existing)
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return path, nil
+		}
+		tail = filepath.Join(filepath.Base(existing), tail)
+		existing = parent
+	}
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, tail), nil
+}
+
+// escapes reports whether a cleaned relative path climbs above its base.
+func escapes(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Name converts an absolute entry path back into a store name, stripping the

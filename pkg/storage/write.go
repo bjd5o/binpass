@@ -21,7 +21,7 @@ func (f *FS) Write(path string, data []byte) error {
 // never has to exist in memory twice.
 func (f *FS) WriteFrom(path string, produce func(io.Writer) error) error {
 	dir := filepath.Dir(path)
-	if err := f.checkNoSymlink(dir); err != nil {
+	if err := f.checkContained(dir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, f.dirPerm()); err != nil {
@@ -60,10 +60,10 @@ func (f *FS) WriteFrom(path string, produce func(io.Writer) error) error {
 // Rename moves an entry, creating the destination directory and pruning any
 // directories the move empties.
 func (f *FS) Rename(from, to string) error {
-	if err := f.checkNoSymlink(filepath.Dir(from)); err != nil {
+	if err := f.checkContained(filepath.Dir(from)); err != nil {
 		return err
 	}
-	if err := f.checkNoSymlink(filepath.Dir(to)); err != nil {
+	if err := f.checkContained(filepath.Dir(to)); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(to), f.dirPerm()); err != nil {
@@ -80,7 +80,7 @@ func (f *FS) Rename(from, to string) error {
 
 // MkdirAll creates a store subdirectory with the store's permissions.
 func (f *FS) MkdirAll(path string) error {
-	if err := f.checkNoSymlink(path); err != nil {
+	if err := f.checkContained(path); err != nil {
 		return err
 	}
 	return os.MkdirAll(path, f.dirPerm())

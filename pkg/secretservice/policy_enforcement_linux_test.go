@@ -263,3 +263,29 @@ func TestSessionsAreBoundToTheClientThatOpenedThem(t *testing.T) {
 		})
 	}
 }
+
+// TestSearchItemsFiltersOnThePolicy covers existence rather than secrecy: a
+// search used to answer every caller, so a program a deny rule refused could
+// still confirm which accounts the store holds by searching for their
+// attributes.
+func TestSearchItemsFiltersOnThePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cfg     Config
+		wantLen int
+	}{
+		{name: "an allowed caller sees the match", cfg: DefaultConfig(), wantLen: 1},
+		{name: "a denied caller sees nothing", cfg: denyCallerConfig(), wantLen: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, store := newPolicyService(t, tc.cfg)
+			storeItem(t, store, "login", "hunter2")
+
+			unlocked, locked, derr := svc.SearchItems(senderMessage(":1.7"),
+				map[string]string{"server": "github.com"})
+			require.Nil(t, derr)
+			assert.Empty(t, locked, "a store this provider can read has nothing locked")
+			assert.Len(t, unlocked, tc.wantLen)
+		})
+	}
+}

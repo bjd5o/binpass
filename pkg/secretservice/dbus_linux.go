@@ -360,7 +360,14 @@ func (s *Service) closeSession(p dbus.ObjectPath, sender string) bool {
 }
 
 // SearchItems implements org.freedesktop.Secret.Service.SearchItems.
-func (s *Service) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, []dbus.ObjectPath, *dbus.Error) {
+//
+// Results are filtered through the policy: a rule that refuses a program an
+// item should not leave it able to confirm that item exists by searching for
+// its attributes. Nothing is recorded for the audit log, because nothing was
+// decrypted and one search would otherwise write a line per match.
+func (s *Service) SearchItems(message dbus.Message, attributes map[string]string) ([]dbus.ObjectPath, []dbus.ObjectPath, *dbus.Error) {
+	sender := senderOf(message)
+
 	names, err := s.store.Collections()
 	if err != nil {
 		return nil, nil, dbusErrf("org.freedesktop.Secret.Error.NoSuchObject", "%s", err)
@@ -373,6 +380,9 @@ func (s *Service) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, 
 			continue
 		}
 		for _, it := range items {
+			if allowed, _ := s.policy.Allow(sender, name, it); !allowed {
+				continue
+			}
 			unlocked = append(unlocked, itemObjectPath(name, it.ID))
 		}
 	}

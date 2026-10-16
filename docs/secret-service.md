@@ -313,6 +313,12 @@ not both run.
   it needs the identity. With a hardware token, that means the token.
 * **The index reveals equality.** Two items with the same attribute value
   produce the same hash.
+* **An item's label and attributes, to anyone who already has its object
+  path.** Those two are D-Bus properties on every exported item, and
+  properties are read without the policy being consulted. `SearchItems` is
+  filtered through it, so a denied program cannot find the path that way, but
+  one that learns a path by other means reads the label and attributes —
+  never the secret.
 
 ---
 

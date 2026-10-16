@@ -419,9 +419,9 @@ binpass sops get  secrets/hosts.yaml db/password
 
 Nested maps are folders, `db/password` is the same path sops-nix uses, and
 each change is one `sops set` — binpass never sees a master key and the
-file's git diff stays one line. [docs/sops.md](docs/sops.md) covers key
-addressing, newline handling, creating files and a `make secrets-edit`
-target.
+file's git diff is the changed value plus sops's `lastmodified` and `mac`
+fields. [docs/sops.md](docs/sops.md) covers key addressing, newline
+handling, creating files and a `make secrets-edit` target.
 
 ## The system keyring
 

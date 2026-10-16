@@ -49,12 +49,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pass gnupg tree age rclone restic
+          sudo sh scripts/install-sops.sh
       - name: Verify the reference tools are present
         run: |
           command -v pass || { echo "pass is missing: the golden suite would skip"; exit 1; }
           command -v tree || { echo "tree is missing: pass cannot render listings"; exit 1; }
           command -v rclone || { echo "rclone is missing: the transport tests would skip"; exit 1; }
           command -v restic || { echo "restic is missing: the snapshot tests would skip"; exit 1; }
+          command -v sops || { echo "sops is missing: the sops suites would skip"; exit 1; }
           docker info >/dev/null || { echo "docker is missing: the MinIO container tests would skip"; exit 1; }
       - name: Unit tests with race detector
         run: go test -race ./...

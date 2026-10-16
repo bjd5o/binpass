@@ -182,6 +182,10 @@ func (a *App) runExport(format string, args []string) error {
 	if err != nil {
 		return err
 	}
+	// An export is the whole store in plaintext, so a restricted plugin may
+	// only ever see its own subtree in it.
+	g := a.Guard()
+	names = g.FilterReadable(names)
 
 	// Export as CSV to stdout or to the specified file.
 	w := a.Out
@@ -196,6 +200,10 @@ func (a *App) runExport(format string, args []string) error {
 
 	fmt.Fprintln(w, "path,username,password,url,otp,notes")
 	for _, name := range names {
+		if err := g.CheckDecrypt(name); err != nil {
+			fmt.Fprintf(a.Err, "skip %s: %v\n", name, err)
+			continue
+		}
 		sec, err := s.Get(name)
 		if err != nil {
 			fmt.Fprintf(a.Err, "skip %s: %v\n", name, err)

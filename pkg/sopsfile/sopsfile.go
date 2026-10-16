@@ -35,10 +35,14 @@ var ErrIsKey = errors.New("sopsfile: name is a key, not a group")
 // every write, so a session decrypts once per change rather than once per
 // key; concurrent edits by another process are picked up on the next write.
 type File struct {
-	// path is kept as given: sops matches .sops.yaml creation rules
-	// against the path it is handed, and the user's relative path is what
-	// those rules were written for.
+	// path is the name as given, for messages. sops runs on abs from dir:
+	// it finds .sops.yaml by walking up from its working directory, not
+	// from the file, and matches path_regex against the file's path
+	// relative to that config (verified on 3.13.3). Running from the
+	// file's directory is what makes `binpass sops edit nixos/secrets/x.yaml`
+	// from a repo root honour the rules next to the file.
 	path   string
+	abs    string
 	dir    string
 	format string
 	sops   string
@@ -68,7 +72,7 @@ func Open(path string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &File{path: path, dir: filepath.Dir(abs), format: format, sops: bin}, nil
+	return &File{path: path, abs: abs, dir: filepath.Dir(abs), format: format, sops: bin}, nil
 }
 
 // Path returns the file path as it was given to Open.
@@ -327,7 +331,7 @@ func (f *File) load() (map[string]any, error) {
 		f.doc = map[string]any{}
 		return f.doc, nil
 	}
-	out, err := f.run(nil, "decrypt", "--output-type", "json", f.path)
+	out, err := f.run(nil, "decrypt", "--output-type", "json", f.abs)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +351,7 @@ func (f *File) load() (map[string]any, error) {
 }
 
 func (f *File) exists() bool {
-	_, err := os.Stat(f.path)
+	_, err := os.Stat(f.abs)
 	return err == nil
 }
 
@@ -365,7 +369,7 @@ func (f *File) write(segs []string, v any) error {
 		if err != nil {
 			return err
 		}
-		_, err = f.run(payload, "set", "--value-stdin", f.path, p)
+		_, err = f.run(payload, "set", "--value-stdin", f.abs, p)
 		return err
 	}
 	doc := map[string]any{}
@@ -380,7 +384,7 @@ func (f *File) write(segs []string, v any) error {
 	if err != nil {
 		return err
 	}
-	out, err := f.run(body, "encrypt", "--filename-override", f.path,
+	out, err := f.run(body, "encrypt", "--filename-override", f.abs,
 		"--input-type", "json", "--output-type", f.format)
 	if err != nil {
 		return err
@@ -394,7 +398,7 @@ func (f *File) unset(segs []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.run(nil, "unset", f.path, p)
+	_, err = f.run(nil, "unset", f.abs, p)
 	return err
 }
 
@@ -415,7 +419,7 @@ func (f *File) replace(ciphertext []byte) error {
 		_ = os.Remove(name)
 		return err
 	}
-	if err := os.Rename(name, f.path); err != nil {
+	if err := os.Rename(name, f.abs); err != nil {
 		_ = os.Remove(name)
 		return err
 	}
@@ -426,6 +430,7 @@ func (f *File) replace(ciphertext []byte) error {
 // travel on stdin; args carry the file and the key path.
 func (f *File) run(stdin []byte, args ...string) ([]byte, error) {
 	cmd := exec.Command(f.sops, args...) //nolint:gosec // binary resolved by LookPath, args built here.
+	cmd.Dir = f.dir
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -267,4 +268,36 @@ func TestFile_SopsErrorSurfaces(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "sops decrypt")
 	assert.False(t, errors.Is(err, store.ErrNotFound))
+}
+
+// The sops-nix layout: .sops.yaml sits next to the secrets, its path_regex
+// is anchored to names relative to it, and `make` runs from the repo root.
+// sops only searches for the config upward from its cwd, so creating,
+// reading and writing must all work when the file is named by a
+// subdirectory-relative path from a cwd that has no config of its own.
+func TestFile_RelativePathFromParentDir(t *testing.T) {
+	root := workspace(t)
+	require.NoError(t, os.Remove(filepath.Join(root, ".sops.yaml")))
+	dir := filepath.Join(root, "nixos", "secrets")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	key, err := os.ReadFile(os.Getenv("SOPS_AGE_KEY_FILE"))
+	require.NoError(t, err)
+	id, err := age.ParseX25519Identity(strings.TrimSpace(string(key)))
+	require.NoError(t, err)
+	cfg := fmt.Sprintf("creation_rules:\n  - path_regex: ^secrets\\.ya?ml$\n    age: %s\n", id.Recipient())
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".sops.yaml"), []byte(cfg), 0o600))
+
+	f := open(t, filepath.Join("nixos", "secrets", "secrets.yaml"))
+	require.NoError(t, f.Set("net/corp/gateway", secret.New("vpn.example", "")))
+	require.NoError(t, f.Set("hosts-extra", secret.Parse([]byte("10.0.0.5 nas\n10.0.0.6 printer\n"))))
+	got, err := Open(filepath.Join("nixos", "secrets", "secrets.yaml"))
+	require.NoError(t, err)
+	sec, err := got.Get("hosts-extra")
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.5 nas\n10.0.0.6 printer\n", string(sec.Bytes()))
+	require.NoError(t, got.Remove("net/corp/gateway"))
+	doc := decrypt(t, filepath.Join(dir, "secrets.yaml"))
+	assert.Equal(t, "10.0.0.5 nas\n10.0.0.6 printer\n", doc["hosts-extra"])
+	_, err = got.Get("net/corp/gateway")
+	assert.ErrorIs(t, err, store.ErrNotFound)
 }

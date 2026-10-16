@@ -450,6 +450,7 @@ func (a *App) buildRemote(name string, deviceID sync.DeviceID) (remote.Remote, e
 			opts.PasswordCommand = rc.PasswordCommand
 		}
 		if rc.Password != "" {
+			warnPlaintextRemotePassword(a.Err, name)
 			opts.Password = rc.Password
 		}
 		return remote.NewResticRemote(opts)

@@ -96,6 +96,15 @@ func (g *GitRemote) ensurePrivate(_ context.Context) error {
 		if d.Name() == ".git" && d.IsDir() {
 			return filepath.SkipDir
 		}
+		// The store root is exempt: keeping the store elsewhere and
+		// symlinking it into place is an ordinary pass setup. Anything below
+		// it is content the remote chose, and the chmod below would follow a
+		// link out of the store.
+		if path != g.dir {
+			if err := CheckNotSymlink(path, d.Type()); err != nil {
+				return err
+			}
+		}
 		want := os.FileMode(storeFilePerm)
 		if d.IsDir() {
 			want = storeDirPerm
@@ -109,8 +118,8 @@ func (g *GitRemote) ensurePrivate(_ context.Context) error {
 		if info.Mode().Perm() == want {
 			return nil
 		}
-		// The worktree is a private directory owned by this process; there is
-		// no window for another user to swap a path for a symlink.
+		// The walk rejected every symlink below the root above, so this
+		// cannot dereference a link planted by the remote.
 		return os.Chmod(path, want) //nolint:gosec // walk over our own private worktree.
 	})
 }
@@ -731,11 +740,21 @@ func (g *GitRemote) preserveDivergedFiles(ctx context.Context, ref string) error
 			continue
 		}
 		src := filepath.Join(g.dir, path)
-		data, err := os.ReadFile(src) //nolint:gosec // a path inside the store.
+		// Preserving a conflicted entry means reading it, and the diverged
+		// side is the remote's: a symlink here would copy a local file the
+		// remote named into the store, from where the next sync uploads it.
+		info, err := os.Lstat(src)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
+			return fmt.Errorf("remote/git: stat %q: %w", path, err)
+		}
+		if err := CheckNotSymlink(path, info.Mode()); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(src) //nolint:gosec // a path inside the store.
+		if err != nil {
 			return fmt.Errorf("remote/git: read %q: %w", path, err)
 		}
 		ext := filepath.Ext(path)

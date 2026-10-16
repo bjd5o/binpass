@@ -206,8 +206,16 @@ nothing recorded to approve, and you put them there yourself.
 | `read_paths` | Listing and reading the named entries. |
 | `write_paths` | Creating and modifying the named entries. |
 | `decrypt` | Access to plaintext. Separate from reading. |
-| `network` | Host allowlist. Absent means no network. |
-| `exec` | External binaries the plugin may invoke. |
+| `network` | **Declared only.** A host list recorded for review; nothing enforces it. |
+| `exec` | **Declared only.** The external binaries the author says the plugin runs. |
+
+The first three are enforced: they describe what a plugin can obtain *through
+binpass*, and every call back in is checked against them. `network` and
+`exec` cannot be enforced at all — a level 1 plugin is an ordinary process
+that opens its own sockets and runs its own programs without asking binpass
+anything. They exist as an audit trail of what the author declared, and the
+approval text labels them as such. Do not approve a plugin on the strength of
+a narrow `network` list; it binds nothing.
 
 **Everything denies by default.** An absent list is an empty list, never a
 wildcard — otherwise a manifest that requests nothing would receive
@@ -388,7 +396,9 @@ binpass does not sandbox plugins and does not pretend to. What it does:
   cannot be handed a forged grant or be pointed at another store by whatever
   invoked binpass.
 * Capabilities are enforced on every call a managed plugin makes back into
-  binpass.
+  binpass. `read_paths`, `write_paths` and `decrypt` only — `network` and
+  `exec` are declarations the plugin is never held to, and the approval text
+  says so.
 * A manifest-carrying plugin does not run until it is approved by name,
   digest and capability list, so one planted in a synced store cannot run
   itself on your next typo.
@@ -417,3 +427,4 @@ Being straight about the gap between the architecture and the code:
 | Level 3 (WASM under wazero) | Not built. This is where isolation would be real: a guest with no file or network access. |
 | `binpass plugin install` / `remove` | Not built. Install by creating the directory yourself, as in [§6](#6-a-worked-example). |
 | `plugins.lock` approval | **Working.** `binpass plugin trust` records consent; a manifest-carrying plugin is refused until then, and again whenever its binary or its capability list changes. There is no interactive prompt: approval is an explicit command. |
+| Enforcing `network` / `exec` | **Not built, and not planned at level 1.** Holding a plugin to them needs a proxy it is obliged to use, which an ordinary process can simply bypass. They are shown as declarations, never as controls. Level 3 (WASM) is where this becomes real. |

@@ -190,11 +190,19 @@ func (a *App) runExport(format string, args []string) error {
 	// Export as CSV to stdout or to the specified file.
 	w := a.Out
 	if len(args) == 1 {
-		f, err := os.Create(args[0]) //nolint:gosec // user-provided path.
+		// This file is the whole store in plaintext, so it is created with
+		// the same 0600 every other secret-bearing write in the tree uses
+		// rather than whatever the umask happens to allow. Chmod is
+		// explicit because O_CREATE only applies the mode to a file that
+		// did not already exist.
+		f, err := os.OpenFile(args[0], os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // user-provided path.
 		if err != nil {
 			return fmt.Errorf("export: %w", err)
 		}
 		defer func() { _ = f.Close() }()
+		if err := f.Chmod(0o600); err != nil {
+			return fmt.Errorf("export: %w", err)
+		}
 		w = f
 	}
 

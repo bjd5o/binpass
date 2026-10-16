@@ -68,6 +68,23 @@ func TestParseManifestRejects(t *testing.T) {
 			wantErr: "could decrypt nothing",
 		},
 		{
+			// With a hostile manifest trusted on sight, this would appoint
+			// any executable already on the victim's disk as "the plugin".
+			name:    "exec climbing out of the plugin directory",
+			yaml:    "name: x\napi: 1\nexec: ../../../../usr/bin/sh\n",
+			wantErr: "must stay inside the plugin directory",
+		},
+		{
+			name:    "exec with a traversal in the middle",
+			yaml:    "name: x\napi: 1\nexec: helpers/../../sh\n",
+			wantErr: "must stay inside the plugin directory",
+		},
+		{
+			name:    "absolute exec",
+			yaml:    "name: x\napi: 1\nexec: /usr/bin/sh\n",
+			wantErr: "must stay inside the plugin directory",
+		},
+		{
 			name:    "network entry given as a URL",
 			yaml:    "name: x\napi: 1\ncapabilities:\n  network: [\"https://a.example/path\"]\n",
 			wantErr: "must be a host",
@@ -96,6 +113,14 @@ func TestManifestBinaryOverride(t *testing.T) {
 	m, err := plugin.ParseManifest([]byte("name: x\napi: 1\nexec: helper.py\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "helper.py", m.Binary())
+}
+
+// TestManifestExecMayNestInsideTheDirectory keeps the containment check from
+// banning the legitimate shape it has to allow.
+func TestManifestExecMayNestInsideTheDirectory(t *testing.T) {
+	m, err := plugin.ParseManifest([]byte("name: x\napi: 1\nexec: bin/helper.py\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "bin/helper.py", m.Binary())
 }
 
 // TestSummaryLeadsWithTheConsequence checks that approval text describes what

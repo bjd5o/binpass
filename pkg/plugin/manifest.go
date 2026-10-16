@@ -22,6 +22,7 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -146,7 +147,23 @@ func (m *Manifest) Validate() error {
 				ErrInvalidManifest, h)
 		}
 	}
+	// Exec names a file inside the plugin's own directory. Left unchecked,
+	// `exec: ../../../../usr/bin/sh` would appoint any executable already on
+	// the victim's disk as "the plugin" and have it run with the whole
+	// BINPASS_* environment, no binary of its own required.
+	if m.Exec != "" && escapesDir(m.Exec) {
+		return fmt.Errorf("%w: exec %q must stay inside the plugin directory",
+			ErrInvalidManifest, m.Exec)
+	}
 	return nil
+}
+
+// escapesDir reports whether a relative path leaves the directory it is
+// joined to, which is the one thing a manifest must not be able to name.
+func escapesDir(rel string) bool {
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	return filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" ||
+		clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
 // validName reports whether a plugin name is safe to use as a subcommand and

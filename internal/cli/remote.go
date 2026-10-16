@@ -147,9 +147,10 @@ func (a *App) runRemoteAdd(remoteType, name string, extra ...string) error {
 			// world-readable through /proc while the command runs, and the
 			// value would then sit in config.yaml in the clear for as long
 			// as the remote exists.
-			return fmt.Errorf("remote add: refusing password=: it would be visible in ps and in your "+
-				"shell history, and then stored in plain text in %s; use password_command= instead "+
-				"(for example password_command=\"binpass show restic/%s\")", config.FilePath(), name)
+			return fmt.Errorf("remote add: unknown field %q: a password given on the command line is "+
+				"visible in ps and in your shell history, and would then sit in plain text in %s; "+
+				"use password_command= instead (for example password_command=\"binpass show restic/%s\")",
+				key, config.FilePath(), name)
 		default:
 			return fmt.Errorf("remote add: unknown field %q (valid: bucket, folder, region, password_command)", key)
 		}

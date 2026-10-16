@@ -861,9 +861,12 @@ token. A `Put(path, content, expectRev)` call fails if another commit has
 touched the file since the SHA was read. This prevents silent overwrites when
 two clients push concurrently.
 
-For cloud transports (S3, Drive, Yandex, WebDAV), conditional writes are
-best-effort. S3 supports `If-Match` on the ETag (not yet wired). For others,
-binpass uses verify-after-write: read the file back after upload and compare.
+The native `s3` transport is a real conditional write: every `Put` goes out
+with `If-Match: <ETag>` and fails with 412 when another device changed the
+object in between (§3), and the advisory lock is created with
+`If-None-Match: *`. The rclone-based transports (Drive, Yandex, WebDAV) have
+no such primitive, so binpass uses verify-after-write there: read the file
+back after upload and compare.
 
 ---
 

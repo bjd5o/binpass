@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/71g3pf4c3/binpass/pkg/crypto"
+	"github.com/71g3pf4c3/binpass/pkg/plugin"
 )
 
 // trustStateName is the file recording the parts of a store that decide who
@@ -22,6 +23,9 @@ const trustStateName = "trust.json"
 type trustState struct {
 	// Recipients maps each recipients file to the recipients it listed.
 	Recipients crypto.RecipientSets `json:"recipients"`
+	// Plugins maps each plugin inside the store to a digest of what
+	// running it would do.
+	Plugins plugin.StoreSnapshot `json:"plugins"`
 }
 
 // loadTrustState reads the record, reporting whether one existed. A store
@@ -91,8 +95,9 @@ func scanRecipientFiles(storeDir string) crypto.RecipientSets {
 	return out
 }
 
-// reportStoreTrust compares the store's recipient sets against what the last
-// sync recorded and warns about anything that changed.
+// reportStoreTrust compares the store's recipient sets and its own plugin
+// directory against what the last sync recorded, and warns about anything
+// that changed.
 //
 // It is a warning and never a prompt: a sync has to keep working from cron
 // and from a hook, and a question nobody is there to answer would turn a
@@ -103,9 +108,13 @@ func (a *App) reportStoreTrust(storeDir string) {
 	stateDir := a.syncStateDir()
 	prev, seen := loadTrustState(stateDir)
 
-	cur := trustState{Recipients: scanRecipientFiles(storeDir)}
+	cur := trustState{
+		Recipients: scanRecipientFiles(storeDir),
+		Plugins:    plugin.SnapshotStorePlugins(storeDir),
+	}
 	if seen {
 		a.warnRecipientChanges(crypto.DiffRecipientSets(prev.Recipients, cur.Recipients))
+		a.warnStorePluginChanges(plugin.DiffStorePlugins(prev.Plugins, cur.Plugins))
 	}
 	if err := cur.save(stateDir); err != nil {
 		fmt.Fprintf(a.Err, "warning: cannot record what the store trusts: %v\n", err)
@@ -130,4 +139,29 @@ func (a *App) warnRecipientChanges(changes []crypto.RecipientChange) {
 		fmt.Fprintf(a.Err, "  Everything written there from now on is encrypted to the keys listed above.\n"+
 			"  If you did not change this, a remote did: check %s before the next insert or edit.\n", c.File)
 	}
+}
+
+// warnStorePluginChanges reports plugins that arrived or changed inside the
+// store.
+//
+// The store's plugin directory syncs with the store, and a plugin there
+// provides a subcommand that dispatches before anything parses the command
+// line — a typo is enough to run it. Noticing a new one required running
+// `binpass plugin list` by hand, which nobody does after a routine sync.
+func (a *App) warnStorePluginChanges(d plugin.StorePluginDiff) {
+	if d.Empty() {
+		return
+	}
+	fmt.Fprintln(a.Err, "warning: the plugins inside the store changed since the last sync")
+	for _, name := range d.Added {
+		fmt.Fprintf(a.Err, "  + %s (new)\n", name)
+	}
+	for _, name := range d.Changed {
+		fmt.Fprintf(a.Err, "  ~ %s (manifest or executable replaced)\n", name)
+	}
+	for _, name := range d.Removed {
+		fmt.Fprintf(a.Err, "  - %s (gone)\n", name)
+	}
+	fmt.Fprint(a.Err, "  `binpass <name>` now runs that program, as does any typo matching it.\n"+
+		"  Review it with `binpass plugin list` before running anything.\n")
 }

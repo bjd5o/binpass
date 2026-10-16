@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"filippo.io/age/plugin"
+	binplugin "github.com/71g3pf4c3/binpass/pkg/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -126,6 +127,37 @@ func TestReportStoreTrustWarnsOnlyOnce(t *testing.T) {
 	app.errOut.Reset()
 	app.reportStoreTrust(app.dir)
 	assert.Empty(t, app.errOut.String(), "the new set is the baseline once it has been reported")
+}
+
+// TestReportStoreTrustWarnsOnStorePluginChange covers detectability of a
+// store-planted plugin: .binpass/plugins travels with every sync, and a
+// plugin there provides a subcommand that runs before the command line is
+// even parsed. Nothing used to say that one had appeared.
+func TestReportStoreTrustWarnsOnStorePluginChange(t *testing.T) {
+	app := newTestApp(t)
+
+	app.reportStoreTrust(app.dir)
+	require.Empty(t, app.errOut.String())
+
+	dir := filepath.Join(binplugin.StorePluginsDir(app.dir), "evil")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	writeFile(t, filepath.Join(dir, binplugin.ManifestName), "name: evil\nversion: 1.0.0\napi: 1\n")
+	writeFile(t, filepath.Join(dir, "binpass-evil"), "#!/bin/sh\n")
+
+	app.reportStoreTrust(app.dir)
+	got := app.errOut.String()
+	assert.Contains(t, got, "warning: the plugins inside the store changed")
+	assert.Contains(t, got, "+ evil (new)")
+
+	// A replaced executable is the same threat with the name already known.
+	app.errOut.Reset()
+	writeFile(t, filepath.Join(dir, "binpass-evil"), "#!/bin/sh\nevil\n")
+	app.reportStoreTrust(app.dir)
+	assert.Contains(t, app.errOut.String(), "~ evil (manifest or executable replaced)")
+
+	app.errOut.Reset()
+	app.reportStoreTrust(app.dir)
+	assert.Empty(t, app.errOut.String(), "a plugin already reported is the new baseline")
 }
 
 // newAgeRecipient returns a throwaway age recipient string.

@@ -163,3 +163,31 @@ func TestExportStaysInsideTheGrant(t *testing.T) {
 		})
 	}
 }
+
+// TestGenerateInPlaceNeedsDecrypt covers the one write path that reads:
+// --in-place keeps everything below the first line, which means decrypting
+// the entry, so a grant that can write but not decrypt must not reach it.
+func TestGenerateInPlaceNeedsDecrypt(t *testing.T) {
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		grant   string
+		inPlace bool
+		wantErr bool
+	}{
+		"write-only grant, in place":  {`{"write_paths":["work/*"]}`, true, true},
+		"write-only grant, overwrite": {`{"write_paths":["work/*"]}`, false, false},
+		"write and decrypt, in place": {narrowGrant, true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			app := restrictedApp(t, tc.grant)
+
+			err := app.runGenerate(ctx, "work/ci", 12, generateOpts{inPlace: tc.inPlace, force: true})
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, plugin.ErrDenied)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

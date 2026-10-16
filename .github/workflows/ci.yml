@@ -199,6 +199,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The digest pin is the control: a bare `FROM golang:1.26-trixie` would
+      # float the toolchain and the X11 packages under this suite again.
+      - name: Base image is pinned by digest
+        run: |
+          grep -qE '^FROM .+@sha256:[0-9a-f]{64}$' Dockerfile.desktop \
+            || { echo "::error::Dockerfile.desktop base image is not digest-pinned"; exit 1; }
       - name: Desktop integration tests
         run: |
           docker build -f Dockerfile.desktop -t binpass-desktop .

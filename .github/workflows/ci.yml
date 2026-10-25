@@ -47,7 +47,7 @@ jobs:
           # resolved to a go1.24 build that refused to load a go.mod targeting
           # 1.26.5). v2.12.2 is what the nix dev shell ships, built with
           # go1.26.5.
-          version: v2.12.2
+          version: v2.15.0
           args: --timeout=5m
 
   test:

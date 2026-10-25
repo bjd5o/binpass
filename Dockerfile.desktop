@@ -16,7 +16,7 @@
 # change under the test without a commit. The tag stays in the comment so a
 # bump is a readable diff (resolve the new digest from the registry, e.g.
 # `skopeo inspect --raw docker://docker.io/library/golang:1.26-trixie`).
-FROM golang:1.26-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c
+FROM golang:1.27-trixie@sha256:fbb7ae40b62ff8afe31662df570d39b4f5052ac32b90dae8e60d7657a20a74f4
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	xvfb \

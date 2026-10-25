@@ -12,7 +12,7 @@
 #
 # On a host whose kernel lacks dm_crypt the tests skip rather than fail, since
 # a missing kernel module is not a defect in this code.
-FROM golang:1.26-trixie
+FROM golang:1.27-trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	cryptsetup-bin \

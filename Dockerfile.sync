@@ -15,7 +15,7 @@
 # Without the socket the suite refuses to start rather than letting the S3
 # tests skip silently: a skipped MinIO test is exactly the false green this
 # image exists to prevent.
-FROM golang:1.26-trixie
+FROM golang:1.27-trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	rclone \

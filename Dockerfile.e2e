@@ -5,7 +5,7 @@
 # clipboard, the launcher scripts, and shell completion can be exercised
 # end to end, against real wl-copy, xclip, fzf and gpg — without touching the
 # developer's session, keyring, store, or clipboard.
-FROM golang:1.26-trixie
+FROM golang:1.27-trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	pass gnupg age git tree \

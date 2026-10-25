@@ -7,7 +7,7 @@
 #
 #   docker build -f Dockerfile.ss -t binpass-ss .
 #   docker run --rm binpass-ss
-FROM golang:1.26-trixie
+FROM golang:1.27-trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	dbus \

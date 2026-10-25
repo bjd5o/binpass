@@ -37,7 +37,7 @@
           # publish a tag whose version does not match this string, so a
           # forgotten bump fails loudly instead of shipping a binary that
           # misreports itself.
-          version = "0.2.0";
+          version = "0.3.0";
           src = ./.;
 
           # Hash of the fetched module set. null would mean "the source
